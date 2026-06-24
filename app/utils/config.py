@@ -10,9 +10,11 @@ class Setting(BaseSettings):
     AWS_REGION:str
     SES_FROM_EMAIL:str
 
+    ALGORITHM:str
+    
     ACCESS_TOKEN_EXPIRE_MINUTES:int
     
     class Config:
-        from_attributes=True
+        env_file=r"app\__gitignore__\.env"
 
 setting=Setting()
