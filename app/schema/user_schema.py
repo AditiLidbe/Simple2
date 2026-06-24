@@ -12,14 +12,13 @@ class UserResponse(BaseModel):
     id:int
     name:str
     email:EmailStr
-    password:str
-    created_at:datetime
+    
     role:RoleEnum
 
 class Login(BaseModel):
     username:str
     password:str
-    
+
 class Token(BaseModel):
     access_token:str
     token_type:str

@@ -6,7 +6,6 @@ logger.info("Authentication Repo..")
 
 
 def get_user_by_email(db:Session,email:str):
-    print(email)
     return db.query(UserModel).filter(UserModel.email == email).first()
 
 def create_user(name:str,email:str,password:str,role:RoleEnum,db:Session):
@@ -18,3 +17,4 @@ def create_user(name:str,email:str,password:str,role:RoleEnum,db:Session):
     db.commit()
     db.refresh(new_user)
     return new_user
+
