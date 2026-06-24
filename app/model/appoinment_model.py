@@ -23,8 +23,8 @@ class AppointmentModel(Base):
 
     #realtionship with clinician
     clinician_id=Column(Integer,ForeignKey("user_model.id"),nullable=False)
-    clinician=relationship("UserModel",back_populates="user_c")
+    clinician = relationship("UserModel", foreign_keys=[clinician_id], back_populates="appointments_as_clinician")
 
     #realtionship with patient
     patient_id=Column(Integer,ForeignKey("user_model.id"),nullable=False)
-    patient=relationship("UserModel",back_populates="user_p")
+    patient = relationship("UserModel", foreign_keys=[patient_id], back_populates="appointments_as_patient")

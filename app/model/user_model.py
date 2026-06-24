@@ -23,7 +23,10 @@ class UserModel(Base):
 
     
     #relationship with appointment as clinician 
-    user_c=relationship("AppointmentModel",back_populates="clinician")
+    appointments_as_clinician = relationship("AppointmentModel", foreign_keys="[AppointmentModel.clinician_id]", back_populates="clinician")
 
-    #relationship with appointment as patient
-    user_p=relationship("AppointmentModel",back_populates="patient")
+    
+    # Relationship with AppointmentModel as PATIENT
+    appointments_as_patient = relationship("AppointmentModel", foreign_keys="[AppointmentModel.patient_id]", back_populates="patient")
+
+
