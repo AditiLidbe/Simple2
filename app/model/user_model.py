@@ -13,7 +13,7 @@ class UserModel(Base):
     __tablename__="user_model"
     id=Column(Integer,primary_key=True,nullable=False)
     name=Column(String,nullable=False)
-    email=Column(String,nullable=False)
+    email=Column(String,nullable=False,unique=True,index=True)
     password=Column(String,nullable=False)
     role=Column(PYENUM(RoleEnum),nullable=False)
 
@@ -28,5 +28,4 @@ class UserModel(Base):
     
     # Relationship with AppointmentModel as PATIENT
     appointments_as_patient = relationship("AppointmentModel", foreign_keys="[AppointmentModel.patient_id]", back_populates="patient")
-
 

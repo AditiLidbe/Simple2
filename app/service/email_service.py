@@ -4,13 +4,18 @@ from ..utils.config import setting
 from fastapi import HTTPException,status
 
 def get_ses_client():
+    if not setting.AWS_SECRET_KEY_ID or not setting.AWS_SECRET_ACCESS_KEY:
+        return None
     return boto3.client('ses',region_name=setting.AWS_REGION,
                         aws_secret_access_key=setting.AWS_SECRET_ACCESS_KEY,
                         aws_access_key_id=setting.AWS_SECRET_KEY_ID)
 
 def send_email(to_email:str,subject:str,body:str):
     try:
-        get_ses_client().send_email(
+        client=get_ses_client()
+        if client is None:
+            return
+        client.send_email(
             Source=setting.SES_FROM_EMAIL,
             Destination={"ToAddresses":[to_email]},
             Message={
@@ -30,4 +35,3 @@ def send_appointment_email(email:str):
                "Your appointment is fixed ",
                f"Please visit the clinic as per your time")
     
-
