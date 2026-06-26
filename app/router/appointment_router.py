@@ -13,6 +13,8 @@ from ..model.document_model import DocumentType
 from ..model.user_model import RoleEnum
 from ..repo import appointment_repo
 from ..schema.appointment_schema import (
+    AssistantRequest,
+    AssistantResponse,
     AppointmentCreate,
     AppointmentDetail,
     AppointmentResponse,
@@ -20,7 +22,9 @@ from ..schema.appointment_schema import (
     QueueItem,
     VisitSummaryCreate,
 )
+from ..schema.chat_schema import ChatSessionResponse
 from ..schema.user_schema import TokenData
+from ..service import assistant_service
 from ..service import appointemnet_service as service
 
 
@@ -140,6 +144,42 @@ def add_visit_summary(
     appointment = service.get_appointment_for_user(appointment_id, db)
     appointment = service.add_summary(db, appointment, data, user)
     return AppointmentDetail.model_validate(appointment, from_attributes=True)
+
+
+@router.post("/{appointment_id}/assistant", response_model=AssistantResponse)
+def intake_assistant(
+    appointment_id: int,
+    data: AssistantRequest,
+    db: Session = Depends(get_db),
+    user: TokenData = Depends(get_current_user),
+):
+    appointment = service.get_appointment_for_user(appointment_id, db)
+    reply = assistant_service.handle_assistant_message(
+        db=db,
+        appointment=appointment,
+        user=user,
+        user_message=data.message,
+    )
+    appointment = service.get_appointment_for_user(appointment_id, db)
+    return AssistantResponse(
+        reply=reply,
+        appointment=AppointmentDetail.model_validate(appointment, from_attributes=True),
+    )
+
+
+@router.get("/{appointment_id}/assistant/history", response_model=ChatSessionResponse)
+def assistant_history(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    user: TokenData = Depends(get_current_user),
+):
+    appointment = service.get_appointment_for_user(appointment_id, db)
+    if not service.can_access_appointment(user, appointment):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access this chat history.")
+    session = assistant_service.get_chat_history(db, appointment_id, appointment.patient_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No assistant chat history found.")
+    return session
 
 
 @router.get("/queue/live", response_model=list[QueueItem])

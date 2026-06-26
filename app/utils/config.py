@@ -9,6 +9,9 @@ class Setting(BaseSettings):
     AWS_S3_BUCKET_NAME:str=""
     AWS_REGION:str="ap-south-1"
     SES_FROM_EMAIL:str="noreply@threshold.local"
+    GROQ_API_KEY:str=""
+    GROQ_MODEL:str="llama-3.1-8b-instant"
+    GROQ_API_URL:str="https://api.groq.com/openai/v1/chat/completions"
 
     ALGORITHM:str
     

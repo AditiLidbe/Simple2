@@ -29,6 +29,14 @@ class IntakeSubmit(BaseModel):
 class VisitSummaryCreate(BaseModel):
     summary:str=Field(min_length=5)
 
+class AssistantRequest(BaseModel):
+    message:str=Field(min_length=2)
+    requested_datetime:datetime|None=None
+
+class AssistantResponse(BaseModel):
+    reply:str
+    appointment:"AppointmentDetail"|None=None
+
 class DocumentResponse(BaseModel):
     id:int
     document_name:str

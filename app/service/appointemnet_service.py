@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import shutil
 
@@ -120,16 +120,30 @@ def add_summary(db: Session, appointment, data, user):
     return appointment_repo.update_appointment(db, appointment)
 
 
+class RescheduleError(Exception):
+    def __init__(self, reason: str, message: str):
+        self.reason = reason
+        self.message = message
+
+
+def reschedule_appointment_service(db: Session, appointment, new_start_time):
+    if appointment.status in [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED]:
+        raise RescheduleError("not_reschedulable", "This appointment cannot be rescheduled.")
+    appointment.date = new_start_time
+    return appointment_repo.update_appointment(db, appointment)
+
+
 def queue_items_for_user(db: Session, user):
     appointments = appointment_repo.list_queue(db)
-    if user.role == RoleEnum.PATIENT:
-        appointments = [a for a in appointments if a.patient_id == user.id]
-    elif user.role == RoleEnum.CLINICIAN:
-        appointments = [a for a in appointments if a.clinician_id == user.id]
+    queue = []
 
-    items = []
-    for index, appointment in enumerate(appointments, start=1):
-        items.append(
+    for appointment in appointments:
+        if user.role == RoleEnum.PATIENT and appointment.patient_id != user.id:
+            continue
+        if user.role == RoleEnum.CLINICIAN and appointment.clinician_id != user.id:
+            continue
+
+        queue.append(
             {
                 "appointment_id": appointment.id,
                 "patient_id": appointment.patient_id,
@@ -137,7 +151,9 @@ def queue_items_for_user(db: Session, user):
                 "clinician_id": appointment.clinician_id,
                 "appointment_time": appointment.date,
                 "status": appointment.status,
-                "position": index if appointment.status == AppointmentStatus.WAITING else None,
+                "position": len(queue) + 1 if appointment.status == AppointmentStatus.WAITING else None,
             }
         )
-    return items
+
+    return queue
+
