@@ -91,10 +91,16 @@ def can_access_appointment(user, appointment):
 
 
 def check_in_appointment(db: Session, appointment, user):
-    if not (user.role == RoleEnum.PATIENT and appointment.patient_id == user.id) and user.role != RoleEnum.FRONT_DESK:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot check in this appointment.")
+    if user.role != RoleEnum.FRONT_DESK:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only front desk can check in a patient.")
     if appointment.status != AppointmentStatus.BOOKED:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only booked appointments can be checked in.")
+    now = datetime.now(timezone.utc)
+    appointment_start = appointment.date
+    if appointment_start.tzinfo is None:
+        appointment_start = appointment_start.replace(tzinfo=timezone.utc)
+    if now.date() != appointment_start.date():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Check-in is only allowed on the appointment day.")
     appointment.status = AppointmentStatus.WAITING
     appointment.checked_in_at = datetime.now(timezone.utc)
     return appointment_repo.update_appointment(db, appointment)
@@ -156,4 +162,3 @@ def queue_items_for_user(db: Session, user):
         )
 
     return queue
-

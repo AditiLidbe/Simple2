@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 import requests
 from fastapi import HTTPException, status
@@ -68,71 +68,86 @@ TOOLS = [
 
 SYSTEM_PROMPT = (
     "You are the Threshold Intake Assistant for a clinic. "
-    "Organize information. Never diagnose, triage by severity, or give medical advice. "
-    "If a request is ambiguous, ask one clarifying question and do not guess. "
-    "If a tool result says it failed, explain that plainly and do not claim success. "
-    "Only ever act on the current patient. There is no way to access another patient's data. "
-    "Use tools when needed, then explain the result in simple language."
+    "Keep things simple and organized. Do not diagnose, triage, or give medical advice. "
+    "If the request is unclear, ask one short clarifying question. "
+    "If a tool says something failed, tell the patient plainly. "
+    "Only work with the current patient. "
 )
 
 
 def _get_upcoming_appointment(db: Session, patient_id: int):
     appointments = appointment_repo.list_patient_appointments(db, patient_id)
-    for appointment in sorted(appointments, key=lambda item: item.date):
-        if appointment.status in [AppointmentStatus.BOOKED, AppointmentStatus.WAITING, AppointmentStatus.CALLED_BACK]:
+    appointments = sorted(appointments, key=lambda item: item.date)
+
+    for appointment in appointments:
+        if appointment.status == AppointmentStatus.BOOKED:
             return appointment
+        if appointment.status == AppointmentStatus.WAITING:
+            return appointment
+        if appointment.status == AppointmentStatus.CALLED_BACK:
+            return appointment
+
     return None
 
 
 def _missing_documents(appointment):
-    existing_types = {document.document_type.value for document in appointment.document}
     missing = []
-    if not appointment.personal_details:
+
+    # Check the simple intake fields first.
+    existing_types = []
+    for document in appointment.document:
+        existing_types.append(document.document_type.value)
+
+    if appointment.personal_details is None:
         missing.append("personal details")
-    if not appointment.medical_history:
+    if appointment.medical_history is None:
         missing.append("medical history")
     if appointment.pre_visit_summary is None:
         missing.append("pre-visit summary")
-    for document_type, label in [
-        ("ID", "ID document"),
-        ("INSURANCE", "insurance card"),
-        ("PRIOR_RECORD", "prior record"),
-    ]:
-        if document_type not in [item.value for item in existing_types]:
-            missing.append(label)
+    if "ID" not in existing_types:
+        missing.append("ID document")
+    if "INSURANCE" not in existing_types:
+        missing.append("insurance card")
+    if "PRIOR_RECORD" not in existing_types:
+        missing.append("prior record")
+
     return missing
 
 
-def execute_tool(name, tool_input, patient_id, session, db: Session):
+def execute_tool(name, tool_input, patient_id, db: Session):
     appointment = _get_upcoming_appointment(db, patient_id)
     if not appointment:
         return {"ok": False, "reason": "no_upcoming_appointment", "message": "No upcoming appointment was found."}
 
     if name == "get_appointment_status":
-        return {
+        result = {
             "ok": True,
             "appointment_id": appointment.id,
             "status": appointment.status,
             "intake_completed": bool(appointment.personal_details and appointment.medical_history),
             "missing_items": _missing_documents(appointment),
         }
+        return result
 
     if name == "reschedule_appointment":
+        new_start_time_text = tool_input.get("new_start_time", "")
         try:
-            new_start_time = datetime.fromisoformat(tool_input["new_start_time"].replace("Z", "+00:00"))
+            new_start_time = datetime.fromisoformat(new_start_time_text.replace("Z", "+00:00"))
         except Exception:
             return {"ok": False, "reason": "invalid_datetime", "message": "The date and time format was not valid."}
 
         try:
-            appointment = appointment_service.reschedule_appointment_service(db, appointment, new_start_time)
+            updated_appointment = appointment_service.reschedule_appointment_service(db, appointment, new_start_time)
         except appointment_service.RescheduleError as exc:
             return {"ok": False, "reason": exc.reason, "message": exc.message}
-        return {"ok": True, "new_start_time": appointment.date.isoformat()}
+
+        return {"ok": True, "new_start_time": updated_appointment.date.isoformat()}
 
     if name == "create_pre_visit_summary":
-        summary = tool_input["summary"].strip()
+        summary = tool_input.get("summary", "").strip()
         if not summary:
             return {"ok": False, "reason": "empty_summary", "message": "The summary cannot be empty."}
+
         appointment.pre_visit_summary = summary
         appointment_repo.update_appointment(db, appointment)
         return {"ok": True}
@@ -147,35 +162,22 @@ def get_chat_history(db: Session, appointment_id: int, patient_id: int):
     return chat_repo.get_session_with_messages(db, session.id)
 
 
-def _build_messages(session):
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for item in session.messages:
-        if item.sender == ChatRole.PATIENT:
-            messages.append({"role": "user", "content": item.message})
-        elif item.sender == ChatRole.ASSISTANT:
-            messages.append({"role": "assistant", "content": item.message})
-        elif item.sender == ChatRole.TOOL:
-            messages.append({"role": "tool", "content": item.message})
-    return messages
-
-
 def _call_groq(messages):
     if not setting.GROQ_API_KEY:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="GROQ_API_KEY is missing.")
 
+    payload = {
+        "model": setting.GROQ_MODEL,
+        "messages": messages,
+        "tools": TOOLS,
+        "tool_choice": "auto",
+        "temperature": 0.2,
+    }
+
     response = requests.post(
         setting.GROQ_API_URL,
-        headers={
-            "Authorization": f"Bearer {setting.GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": setting.GROQ_MODEL,
-            "messages": messages,
-            "tools": TOOLS,
-            "tool_choice": "auto",
-            "temperature": 0.2,
-        },
+        headers={"Authorization": f"Bearer {setting.GROQ_API_KEY}", "Content-Type": "application/json"},
+        json=payload,
         timeout=60,
     )
     response.raise_for_status()
@@ -193,8 +195,14 @@ def handle_assistant_message(db: Session, appointment, user, user_message: str):
     chat_repo.add_message(db, session.id, ChatRole.PATIENT, user_message)
     session = chat_repo.get_session_with_messages(db, session.id)
 
-    messages = _build_messages(session)
-    messages.append({"role": "user", "content": user_message})
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for item in session.messages:
+        if item.sender == ChatRole.PATIENT:
+            messages.append({"role": "user", "content": item.message})
+        elif item.sender == ChatRole.ASSISTANT:
+            messages.append({"role": "assistant", "content": item.message})
+        elif item.sender == ChatRole.TOOL:
+            messages.append({"role": "tool", "content": item.message})
 
     while True:
         model_reply = _call_groq(messages)
@@ -208,8 +216,9 @@ def handle_assistant_message(db: Session, appointment, user, user_message: str):
         messages.append(model_reply)
         for tool_call in tool_calls:
             tool_name = tool_call["function"]["name"]
-            tool_input = json.loads(tool_call["function"].get("arguments", "{}"))
-            result = execute_tool(tool_name, tool_input, user.id, session, db)
+            tool_arguments = tool_call["function"].get("arguments", "{}")
+            tool_input = json.loads(tool_arguments)
+            result = execute_tool(tool_name, tool_input, user.id, db)
             chat_repo.add_message(db, session.id, ChatRole.TOOL, json.dumps(result))
             messages.append(
                 {
